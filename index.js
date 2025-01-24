@@ -1,24 +1,20 @@
 import express from "express";
-import sessions from "express-session";
-import bodyParser from "body-parser";
 import moment from "moment-timezone";
 import { v4 as uuidv4 } from 'uuid';
 import os from "os";
-
+import cors from 'cors';
 
 const app = express();
 const PORT = 3500;
 
+app.use(cors()); // CORS
 app.use(express.json());  // Asegúrate de usar este middleware
 app.use(express.urlencoded({ extended: true }));
 
-// Configuración del middleware de sesión
-app.use(sessions({
-    secret: "p04-YGH#yghyjdjhc-SesionesHTTPS",
-    resave: false,
-    saveUninitialized: false,
-    cookie: { maxAge: 5 * 60 * 1000 }
-}));
+// Configuración de sessionStore
+const sessionStore = {};
+
+// Función para obtener la IP del servidor
 const getServerNetworkInfo = () => {
     const interfaces = os.networkInterfaces();
 
@@ -29,8 +25,9 @@ const getServerNetworkInfo = () => {
             }
         }
     }
-}; 
-// Función de utilidad que permitirá acceder a la información de la interfaz de red en este caso (LAN)
+};
+
+// Función de utilidad que permitirá acceder a la información de la IP del cliente
 const getClienteIP = (req) => {
     return (
         req.headers["x-forwarded-for"] ||
@@ -40,10 +37,30 @@ const getClienteIP = (req) => {
     );
 };
 
+// Configuración del intervalo de inactividad (2 minutos = 120,000 ms)
+const SESSION_TIMEOUT = 2 * 60 * 1000; // 2 minutos en milisegundos
+
+// Función para eliminar sesiones inactivas
+const cleanupInactiveSessions = () => {
+    const now = moment.tz("America/Mexico_City");
+    for (const sessionId in sessionStore) {
+        const session = sessionStore[sessionId];
+        const lastAccessed = moment(session.lastAccessed);
+        const inactivityDuration = now.diff(lastAccessed);
+
+        if (inactivityDuration > SESSION_TIMEOUT) {
+            // Si la sesión ha estado inactiva por más de 2 minutos, eliminarla
+            delete sessionStore[sessionId];
+            console.log(`Sesión ${sessionId} eliminada por inactividad.`);
+        }
+    }
+};
+
+// Intervalo para limpiar sesiones inactivas
+setInterval(cleanupInactiveSessions, 60 * 1000); // Revisa cada minuto
+
 // Login Endpoint
 app.post("/login", (req, res) => {
- //   console.log(req.body);  // Añadir esta línea para verificar los datos que llegan
-
     const { email, nickname, macAddress } = req.body;
 
     if (!email || !nickname || !macAddress) {
@@ -52,74 +69,103 @@ app.post("/login", (req, res) => {
 
     // Generar un ID de sesión único
     const sessionId = uuidv4();
-    const now = new Date();
+    const now = moment.tz("America/Mexico_City").format(); // Hora en CDMX
 
-    // Guardar los datos de la sesión en req.session
-    req.session.sessionId = sessionId;
-    req.session.email = email;
-    req.session.nickname = nickname;
-    req.session.macAddress = macAddress;
-    req.session.ip = getServerNetworkInfo();
-    req.session.createdAt = now;
-    req.session.lastAccessed = now;
+    // Guardar los datos de la sesión en sessionStore
+    sessionStore[sessionId] = {
+        sessionId: sessionId,
+        email: email,
+        nickname: nickname,
+        macAddress: macAddress,
+        ip: getServerNetworkInfo(), // Información del servidor
+        createdAt: now,
+        lastAccessed: now
+    };
 
+    // Fecha de inicio de la sesión
     res.status(200).json({
         message: "Se ha logeado de manera exitosa !!!",
         sessionId
     });
 });
 
-
 // Logout Endpoint
 app.post("/logout", (req, res) => {
     const { sessionId } = req.body;
 
-    if (!sessionId || !req.session.sessionId) {
+    if (!sessionId || !sessionStore[sessionId]) {
         return res.status(404).json({ message: "No se encuentra una sesión activa" });
     }
 
     // Eliminar la sesión de la memoria
-    req.session.destroy((err) => {
-        if (err) {
-            return res.status(500).send('Error al cerrar sesión');
-        }
-    });
+    delete sessionStore[sessionId];
 
     res.status(200).json({ message: "Logout successful" });
 });
 
 // Actualización de la sesión
-app.post("/update", (req, res) => {
+app.put("/update", (req, res) => {
     const { sessionId, email, nickname } = req.body;
-
-    if (!sessionId || req.session.sessionId !== sessionId) {
+    if (!sessionId || !sessionStore[sessionId]) {
         return res.status(404).json({ message: "No existe una sesión activa" });
     }
+    
+    const session = sessionStore[sessionId];
+    const now = moment.tz("America/Mexico_City");
 
-    if (email) req.session.email = email;
-    if (nickname) req.session.nickname = nickname;
+    // Actualizamos los campos de la sesión
+    if (email) session.email = email;
+    if (nickname) session.nickname = nickname;
+    session.lastAccessed = now.format(); // Actualiza la hora de acceso
 
-    req.session.lastAccessed = new Date();
+    // Tiempo de conexión (diferencia entre createdAt y la hora actual)
+    const connectionTime = now.diff(moment(session.createdAt), 'seconds');
+    // Tiempo de inactividad (diferencia entre lastAccessed y la hora actual)
+    const inactivityTime = now.diff(moment(session.lastAccessed), 'seconds');
 
     res.status(200).json({
         message: "Sesión ha sido actualizada",
-        session: req.session
+        session: {
+            ...session,
+            connectionTime: `${connectionTime} seconds`, // Tiempo de conexión
+            inactivityTime: `${inactivityTime} seconds`  // Tiempo de inactividad
+        }
     });
 });
 
 // Endpoint para verificar el estado de la sesión
 app.get("/status", (req, res) => {
-    const sessionId = req.query.sessionId;
+    const { sessionId } = req.query;
 
-    if (!sessionId || req.session.sessionId !== sessionId) {
+    if (!sessionId || !sessionStore[sessionId]) {
         return res.status(404).json({ message: "No existe una sesión activa" });
     }
 
+    const session = sessionStore[sessionId];
+    const now = moment.tz("America/Mexico_City");
+
+    // Tiempo de conexión (diferencia entre createdAt y la hora actual)
+    const connectionTime = now.diff(moment(session.createdAt), 'seconds');
+    // Tiempo de inactividad (diferencia entre lastAccessed y la hora actual)
+    const inactivityTime = now.diff(moment(session.lastAccessed), 'seconds');
+
     res.status(200).json({
         message: "Sesión activa",
-        session: req.session
+        session: {
+            ...session,
+            connectionTime: `${connectionTime} seconds`, // Tiempo de conexión
+            inactivityTime: `${inactivityTime} seconds`  // Tiempo de inactividad
+        }
     });
 });
+
+// // Endpoint para obtener sesiones activas
+// app.get("/active-sessions", (req, res) => {
+//     res.status(200).json({
+//         message: "Sesiones activas",
+//         activeSessions: Object.values(sessionStore)
+//     });
+// });
 
 // Endpoint para mensaje de bienvenida
 app.get("/", (req, res) => {
@@ -128,9 +174,6 @@ app.get("/", (req, res) => {
         author: "Yazmin Gutierrez Hernandez"
     });
 });
-
-// Función de utilidad que permitirá acceder a la información de la interfaz de red
-
 
 // Inicializamos el servicio
 app.listen(PORT, () => {
