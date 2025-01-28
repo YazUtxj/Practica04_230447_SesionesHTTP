@@ -9,7 +9,7 @@ const app = express();
 const PORT = 3500;
 //asyc y await son para trabajar con promesas y con la base de datos, es decir espera  a que las consultas se completen para seguir 
 // Configurar MongoDB
-mongoose.connect("mongodb+srv://12345:12345@yazmincloster.hkvat.mongodb.net/sesiones_http?retryWrites=true&w=majority")
+mongoose.connect("mongodb+srv://12345:12345@yazmincloster.hkvat.mongodb.net/API-AWOS_40_230447?retryWrites=true&w=majority")
   .then(() => console.log("Conectado a MongoDB Atlas"))
   .catch(err => console.error("Error al conectar a MongoDB Atlas:", err));
 // Definir esquema y modelo para sesiones
