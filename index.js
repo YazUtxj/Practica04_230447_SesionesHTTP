@@ -47,7 +47,7 @@ app.post("/login", async (req, res) => {
         return res.status(400).json({ message: "Se esperan campos requeridos" });
     }
     const sessionId = uuidv4();
-    const now = moment.tz("America/Mexico_City").toDate();
+    const now = moment.tz("America/Mexico_City").toDate(); // Asegúrate de convertir la hora a la zona de CDMX
     const session = new Session({
         sessionId,
         email,
@@ -89,7 +89,7 @@ app.put("/update", async (req, res) => {
         const now = moment.tz("America/Mexico_City");
         if (email) session.email = email;
         if (nickname) session.nickname = nickname;
-        session.lastAccessed = now.toDate();
+        session.lastAccessed = now.toDate(); // Actualizar la hora en la zona horaria de México
         await session.save();
 
         const connectionTime = moment(session.createdAt).fromNow();
@@ -108,41 +108,102 @@ app.put("/update", async (req, res) => {
 
 app.get("/status", async (req, res) => {
     try {
-        const now = moment.tz("America/Mexico_City");
+        const now = moment.tz("America/Mexico_City"); // Hora local de CDMX
         const sessions = await Session.find();
+        
         const formattedSessions = sessions.map(session => {
-            const connectionTime = moment(session.createdAt).fromNow();
-            const inactivityTime = moment(session.lastAccessed).fromNow();
-            return { ...session.toObject(), connectionTime, inactivityTime };
+            // Convertir las fechas a la zona horaria de CDMX
+            const connectionTime = moment(session.createdAt).tz("America/Mexico_City").fromNow();
+            const inactivityTime = moment(session.lastAccessed).tz("America/Mexico_City").fromNow();
+            
+            // Formatear las fechas a un formato legible (puedes elegir el formato que prefieras)
+            const formattedCreatedAt = moment(session.createdAt).tz("America/Mexico_City").format('YYYY-MM-DD HH:mm:ss');
+            const formattedLastAccessed = moment(session.lastAccessed).tz("America/Mexico_City").format('YYYY-MM-DD HH:mm:ss');
+            
+            return {
+                ...session.toObject(),
+                connectionTime,
+                inactivityTime,
+                formattedCreatedAt,
+                formattedLastAccessed
+            };
         });
-        res.status(200).json({ message: "Estado de las sesiones", sessions: formattedSessions });
+        
+        res.status(200).json({
+            message: "Estado de las sesiones",
+            sessions: formattedSessions
+        });
     } catch (error) {
         res.status(500).json({ message: "Error al obtener el estado de las sesiones", error });
     }
 });
 
+// Endpoint para listar sesiones activas
 app.get("/listCurrentSessions", async (req, res) => {
     try {
         const sessions = await Session.find({ status: "active" });
         if (sessions.length === 0) {
             return res.status(200).json({ message: "No hay sesiones activas" });
         }
-        res.status(200).json({ message: "Todas las sesiones activas", sessions });
+
+        // Formatear las fechas de las sesiones a la hora local de Ciudad de México
+        const formattedSessions = sessions.map(session => {
+            const formattedCreatedAt = moment(session.createdAt).tz("America/Mexico_City").format('YYYY-MM-DD HH:mm:ss');
+            const formattedLastAccessed = moment(session.lastAccessed).tz("America/Mexico_City").format('YYYY-MM-DD HH:mm:ss');
+            return {
+                ...session.toObject(),
+                formattedCreatedAt,
+                formattedLastAccessed
+            };
+        });
+
+        res.status(200).json({ message: "Todas las sesiones activas", sessions: formattedSessions });
     } catch (error) {
         res.status(500).json({ message: "Error al obtener todas las sesiones", error });
     }
 });
 
+// Función para limpiar sesiones inactivas
 const cleanInactiveSessions = async () => {
     try {
-        const now = moment.tz("America/Mexico_City");
+        const now = moment.tz("America/Mexico_City"); // Asegurarse de que el tiempo esté en la hora local de México
         await Session.deleteMany({ lastAccessed: { $lt: now.subtract(2, 'minutes').toDate() } });
     } catch (error) {
         console.error("Error al limpiar sesiones inactivas:", error);
     }
 };
-setInterval(cleanInactiveSessions, 60 * 1000);
 
+// Limpiar sesiones inactivas cada minuto
+setInterval(cleanInactiveSessions, 120 * 1000); // Limpiar sesiones inactivas cada minuto
+// Endpoint para listar todas las sesiones
+app.get("/listAllSessions", async (req, res) => {
+    try {
+        const sessions = await Session.find();
+        // Formatear las fechas de las sesiones a la hora local de Ciudad de México
+        const formattedSessions = sessions.map(session => {
+            const formattedCreatedAt = moment(session.createdAt).tz("America/Mexico_City").format('YYYY-MM-DD HH:mm:ss');
+            const formattedLastAccessed = moment(session.lastAccessed).tz("America/Mexico_City").format('YYYY-MM-DD HH:mm:ss');
+            return {
+                ...session.toObject(),
+                formattedCreatedAt,
+                formattedLastAccessed
+            };
+        });
+        res.status(200).json({
+            message: "Lista de todas las sesiones",
+            sessions: formattedSessions,
+        });
+    } catch (error) {
+        res.status(500).json({ message: "Error al obtener las sesiones", error });
+    }
+});
+// Endpoint de bienvenida
+app.get("/", (req, res) => {
+    res.status(200).json({
+        message: "Bienvenida al API de Control de Sesiones",
+        author: "Yazmin Gutierrez Hernandez",
+    });
+});
 app.listen(PORT, () => {
     console.log(`Servicio iniciando en http://localhost:${PORT}`);
 });
